@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Rider</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000019;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+        }
+
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 30px rgba(199, 56, 89, 0.4);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .neon-text {
+            text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 20px #0ff, 0 0 30px #0ff;
+            margin: 0;
+        }
+
+        #score-board {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #0ff;
+            text-shadow: 0 0 10px #0ff;
+        }
+
+        #message-center {
+            text-align: center;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 20px 40px;
+            border-radius: 10px;
+            border: 1px solid #0ff;
+            box-shadow: 0 0 15px #0ff;
+        }
+
+        h1 { font-size: 48px; margin-bottom: 10px; }
+        p { font-size: 18px; color: #aaa; }
+        
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div id="ui-layer">
+        <div id="score-board">SCORE: <span id="score">0</span></div>
+        <div id="message-center">
+            <h1 class="neon-text" id="main-text">CYBER RIDER</h1>
+            <p id="sub-text">Press [SPACE] or [UP ARROW] to Start</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreElement = document.getElementById('score');
+    const messageCenter = document.getElementById('message-center');
+    const mainText = document.getElementById('main-text');
+    const subText = document.getElementById('sub-text');
+
+    // Game Variables
+    let gameState = 'START'; // START, PLAYING, GAMEOVER
+    let score = 0;
+    let gameSpeed = 6;
+    let frames = 0;
+    let framesUntilNextSpawn = 0;
+    
+    // Entities
+    let player;
+    let obstacles = [];
+    let particles = [];
+    const groundY = 320;
+
+    class Player {
+        constructor() {
+            this.x = 80;
+            this.y = groundY;
+            this.width = 40;
+            this.height = 40;
+            this.dy = 0;
+            this.gravity = 0.7;
+            this.jumpForce = -13;
+            this.isGrounded = true;
+        }
+
+        jump() {
+            if (this.isGrounded) {
+                this.dy = this.jumpForce;
+                this.isGrounded = false;
+                createParticles(this.x + 10, this.y + this.height, 10, '#0ff');
+            }
+        }
+
+        update() {
+            this.dy += this.gravity;
+            this.y += this.dy;
+
+            if (this.y + this.height > groundY) {
+                this.y = groundY - this.height;
+                this.dy = 0;
+                this.isGrounded = true;
+            }
+        }
+
+        draw() {
+            ctx.save();
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#0ff';
+            ctx.strokeStyle = '#0ff';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Bike wheels
+            ctx.beginPath();
+            ctx.arc(this.x + 10, this.y + 30, 10, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(this.x + 35, this.y + 30, 10, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Bike frame
+            ctx.beginPath();
+            ctx.moveTo(this.x + 10, this.y + 30);
+            ctx.lineTo(this.x + 20, this.y + 15);
+            ctx.lineTo(this.x + 35, this.y + 30);
+            ctx.moveTo(this.x + 20, this.y + 15);
+            ctx.lineTo(this.x + 30, this.y + 15);
+            ctx.stroke();
+
+            // Rider
+            ctx.fillStyle = '#fff';
+            ctx.shadowColor = '#fff';
+            ctx.beginPath();
+            ctx.arc(this.x + 22, this.y + 2, 5, 0, Math.PI * 2); // Head
+            ctx.fill();
+            ctx.fillRect(this.x + 18, this.y + 8, 8, 12); // Body
+            
+            ctx.restore();
+
+            // Exhaust trail
+            if (frames % 3 === 0 && this.isGrounded) {
+                particles.push(new Particle(this.x - 5, this.y + 35, '#0ff'));
+            }
+        }
+    }
+
+    class Obstacle {
+        constructor(type) {
+            this.type = type; // 'spike' or 'drone'
+            this.width = 30;
+            this.height = type === 'spike' ? 40 : 25;
+            this.x = canvas.width;
+            this.y = type === 'spike' ? groundY - this.height : groundY - 100 - Math.random() * 40;
+            this.passed = false;
+        }
+
+        update() {
+            this.x -= gameSpeed;
+        }
+
+        draw() {
+            ctx.save();
+            if (this.type === 'spike') {
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#ffff';
+                ctx.fillStyle = '#000';
+                
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y + this.height);
+                ctx.lineTo(this.x + this.width / 2, this.y);
+                ctx.lineTo(this.x + this.width, this.y + this.height);
+                ctx.fill();
+            } else {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#f0f';
+                ctx.fillStyle = '#f0f';
+                
+                // Drone body
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                
+                // Drone rotors
+                ctx.fillStyle = '#fff';
+                let rotorAnim = (frames % 10 > 5) ? -2 : 2;
+                ctx.fillRect(this.x - 5, this.y + 5 + rotorAnim, 5, 4);
+                ctx.fillRect(this.x + this.width, this.y + 5 - rotorAnim, 5, 4);
+            }
+            ctx.restore();
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) {
+            this.x = x;
+            this.y = y;
+            this.color = color;
+            this.size = Math.random() * 3 + 1;
+            this.speedX = Math.random() * -2 - 1;
+            this.speedY = Math.random() * 2 - 1;
+            this.life = 1;
+        }
+        update() {
+            this.x += this.speedX;
+            this.y += this.speedY;
+            this.life -= 0.05;
+        }
+        draw() {
+            ctx.globalAlpha = this.life;
+            ctx.fillStyle = this.color;
+            ctx.fillRect(this.x, this.y, this.size, this.size);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function createParticles(x, y, amount, color) {
+        for (let i = 0; i < amount; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
+
+    function spawnObstacle() {
+        if (framesUntilNextSpawn <= 0) {
+            obstacles.push(new Obstacle('spike'));
+            framesUntilNextSpawn = Math.floor(Math.random() * 30 + 60); 
+        }
+        framesUntilNextSpawn--;
+    }
+
+    function drawBackground() {
+        // Sunset Gradient
+        let bgGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        bgGradient.addColorStop(0, '#0a0515'); // Dark blue/purple
+        bgGradient.addColorStop(0.5, '#2b1035'); // Deep purple
+        bgGradient.addColorStop(1, '#d14334'); // Neon Sunset Orange/Red
+        ctx.fillStyle = bgGradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Grid/Ground effect
+        ctx.strokeStyle = 'rgba(255, 100, 150, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, groundY);
+        ctx.lineTo(canvas.width, groundY);
+        ctx.stroke();
+
+        // Moving ground lines for speed effect
+        let lineOffset = (frames * gameSpeed) % 40;
+        for (let i = 0; i < canvas.width; i += 40) {
+            ctx.beginPath();
+            ctx.moveTo(i - lineOffset, groundY);
+            ctx.lineTo((i - lineOffset) - 20, canvas.height);
+            ctx.stroke();
+        }
+    }
+
+    function checkCollision(p, o) {
+        // Simple AABB Collision with a small hitbox reduction for fairness
+        const padding = 8;
+        return (
+            p.x + padding < o.x + o.width - padding &&
+            p.x + p.width - padding > o.x + padding &&
+            p.y + padding < o.y + o.height - padding &&
+            p.y + p.height - padding > o.y + padding
+        );
+    }
+
+    function init() {
+        player = new Player();
+        obstacles = [];
+        particles = [];
+        score = 0;
+        gameSpeed = 6;
+        frames = 0;
+        framesUntilNextSpawn = 0;
+        scoreElement.innerText = score;
+        messageCenter.classList.add('hidden');
+        gameState = 'PLAYING';
+        loop();
+    }
+
+    function gameOver() {
+        gameState = 'GAMEOVER';
+        messageCenter.classList.remove('hidden');
+        mainText.innerText = "RETRY";
+        mainText.style.textShadow = "0 0 5px #f00, 0 0 20px #f00";
+        subText.innerText = "Press [SPACE] to Reboot";
+        createParticles(player.x + 20, player.y + 20, 30, '#f00');
+    }
+
+    function loop() {
+        if (gameState !== 'PLAYING') return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawBackground();
+
+        // Update & Draw Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update();
+            particles[i].draw();
+            if (particles[i].life <= 0) particles.splice(i, 1);
+        }
+
+        // Update & Draw Player
+        player.update();
+        player.draw();
+
+        // Handle Obstacles
+        spawnObstacle();
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            let obs = obstacles[i];
+            obs.update();
+            obs.draw();
+
+            // Collision Check
+            if (checkCollision(player, obs)) {
+                gameOver();
+            }
+
+            // Score Check
+            if (!obs.passed && obs.x + obs.width < player.x) {
+                obs.passed = true;
+                score++;
+                scoreElement.innerText = score;
+                // Gradually increase speed ONLY after score reaches 30
+                if (score >= 10 && score % 5 === 0) {
+                    gameSpeed += 2.5; 
+                }
+            }
+
+            // Remove off-screen obstacles
+            if (obs.x + obs.width < 0) {
+                obstacles.splice(i, 1);
+            }
+        }
+
+        frames++;
+        requestAnimationFrame(loop);
+    }
+
+    // Initial render for Start Screen
+    drawBackground();
+
+    // Controls
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            if (gameState === 'PLAYING') {
+                player.jump();
+            } else {
+                init();
+            }
+        }
+    });
+
+    window.addEventListener('mousedown', () => {
+        if (gameState === 'PLAYING') {
+            player.jump();
+        } else {
+            init();
+        }
+    });
+</script>
+</body>
+</html>
